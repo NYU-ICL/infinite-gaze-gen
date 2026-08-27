@@ -1,18 +1,67 @@
-## End-to-End Video Example
+# Infinite Gaze Generation for Videos with Autoregressive Diffusion
 
-Use `full_video_pipeline.ipynb` as the complete example for processing one
-video. It generates saliency latents from the input video, loads
-`final_model/checkpoint_70.pth`, predicts a gaze trajectory, and writes an
-`overlay.mp4` with the prediction drawn over the source video. Set
-`INPUT_VIDEO` in the first notebook cell, then run the notebook top-to-bottom.
+**ECCV 2026**
 
+Jenna Kang, Colin Groth, Tong Wu, Finley Torrens, Patsorn Sangkloy, Gordon Wetzstein, Qi Sun
 
-Checkpoint download: https://drive.google.com/drive/folders/1wlbaFsqxYYNagDdSrv44OEOjs5-vew4k?usp=sharing
+[Paper](https://arxiv.org/abs/2603.24938) | Code
 
-## Minimal Environment Setup
+Official implementation of **Infinite Gaze Generation for Videos with Autoregressive Diffusion**.
 
-Create and activate a Python 3.10 environment, then install the runtime
-dependencies:
+We introduce a generative framework for **infinite-horizon raw gaze prediction** in videos of arbitrary length. The model uses autoregressive diffusion to generate continuous gaze trajectories with high-resolution temporal information, conditioned on saliency-aware visual features.
+
+## End-to-End Inference
+
+The easiest way to run the complete pipeline on a video is:
+
+```text
+full_video_pipeline.ipynb
+```
+
+The notebook:
+
+1. Loads an input video.
+2. Generates UNISAL saliency latents.
+3. Loads the trained gaze-generation model.
+4. Generates a gaze trajectory.
+5. Renders the prediction over the original video.
+6. Saves the result as `overlay.mp4`.
+
+Set:
+
+```python
+INPUT_VIDEO = "path/to/video.mp4"
+```
+
+in the first notebook cell and run the notebook from top to bottom.
+
+## Pretrained Checkpoint
+
+Download the pretrained model checkpoint here:
+
+[Google Drive](https://drive.google.com/drive/folders/1wlbaFsqxYYNagDdSrv44OEOjs5-vew4k?usp=sharing)
+
+Place:
+
+```text
+checkpoint_70.pth
+```
+
+under:
+
+```text
+final_model/
+```
+
+so that the expected path is:
+
+```text
+final_model/checkpoint_70.pth
+```
+
+## Environment Setup
+
+Create a Python 3.10 environment:
 
 ```bash
 conda create -n inf_gaze python=3.10 -y
@@ -20,65 +69,148 @@ conda activate inf_gaze
 pip install -r requirements.txt
 ```
 
-For NVIDIA GPU inference, install the PyTorch build appropriate for your CUDA
-setup before installing the remaining requirements. For example, CUDA 11.8:
+For NVIDIA GPU inference, install the PyTorch build corresponding to your CUDA version before installing the remaining dependencies.
+
+For example, for CUDA 11.8:
 
 ```bash
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 pip install -r requirements.txt
 ```
 
-## Train
-
-```bash
-python train.py --config config/full_diem.yaml --root-dir artifacts
-```
-
-`--root-dir` must contain `datasets/DIEM`. In this checkout, the DIEM dataset
-is located at `artifacts/datasets/DIEM`, so use `--root-dir artifacts` as shown
-above. That dataset root must contain:
-
-- `split_files/diem_final_video_train.json`
-- `split_files/diem_final_video_val.json`
-- `saliency_unisal_latents_small/<stim>/frame_XXXXXX.pt` or `XXXXXX.pt`
-- DIEM gaze/video folders under the dataset root
-
-## Sample One Video
-
-```bash
-python sample_video.py ^
-  --config config/full_diem.yaml ^
-  --checkpoint artifacts/experiments/unet_saliency_hires_original_diem/.../checkpoints/checkpoint_3000.pth ^
-  --video-path path/to/video.mp4 ^
-  --conditioning-dir path/to/saliency_unisal_latents_small/<video_stem>
-```
-
-If `--conditioning-dir` is omitted, the script looks for a sibling folder matching the config conditioning name.
-
-Outputs are written under `artifacts/video_samples/<video_stem>/sample_XXX/`.
-Each sample folder now includes:
-
-- `scanpath.csv`
-- `scanpath.json`
-- `overlay.mp4`
-
-`overlay.mp4` draws the generated gaze points over the original video. The runtime used to execute `sample_video.py` needs OpenCV (`cv2`) for overlay rendering.
-
 ## Generate UNISAL Conditioning
 
-To create `saliency_unisal_latents_small/<video_stem>/*.pt` for a single input video:
+To generate saliency conditioning for a single video:
 
 ```bash
-python generate_unisal_latents.py ^
-  --video-path path/to/video.mp4 ^
-  --output-root path/to/saliency_unisal_latents_small
+python generate_unisal_latents.py \
+    --video-path path/to/video.mp4 \
+    --output-root path/to/saliency_unisal_latents_small
 ```
 
-That writes:
+This creates:
 
-- `path/to/saliency_unisal_latents_small/<video_stem>/000001.pt`
-- `path/to/saliency_unisal_latents_small/<video_stem>/000002.pt`
-- ...
+```text
+saliency_unisal_latents_small/
+└── <video_stem>/
+    ├── 000001.pt
+    ├── 000002.pt
+    ├── 000003.pt
+    └── ...
+```
 
-Then use that folder with `sample_video.py --conditioning-dir`.
+These latents can then be passed to the gaze-generation model.
 
+## Sample a Video
+
+Generate a gaze trajectory from an input video with:
+
+```bash
+python sample_video.py \
+    --config config/full_diem.yaml \
+    --checkpoint path/to/checkpoint.pth \
+    --video-path path/to/video.mp4 \
+    --conditioning-dir path/to/saliency_unisal_latents_small/<video_stem>
+```
+
+If `--conditioning-dir` is omitted, the script searches for a sibling directory corresponding to the conditioning name specified in the configuration.
+
+Outputs are written to:
+
+```text
+artifacts/video_samples/<video_stem>/sample_XXX/
+```
+
+Each sample contains:
+
+```text
+scanpath.csv
+scanpath.json
+overlay.mp4
+```
+
+`overlay.mp4` visualizes the generated gaze trajectory over the source video.
+
+OpenCV (`cv2`) is required for overlay rendering.
+
+## Training
+
+Train the model using:
+
+```bash
+python train.py \
+    --config config/full_diem.yaml \
+    --root-dir artifacts
+```
+
+The expected DIEM dataset location is:
+
+```text
+artifacts/datasets/DIEM/
+```
+
+The dataset root should contain:
+
+```text
+datasets/DIEM/
+├── split_files/
+│   ├── diem_final_video_train.json
+│   └── diem_final_video_val.json
+├── saliency_unisal_latents_small/
+│   └── <stim>/
+│       ├── frame_XXXXXX.pt
+│       └── ...
+└── <DIEM gaze and video data>
+```
+
+Saliency latent filenames may also use:
+
+```text
+XXXXXX.pt
+```
+
+instead of:
+
+```text
+frame_XXXXXX.pt
+```
+
+## Repository Structure
+
+```text
+.
+├── config/
+│   └── full_diem.yaml
+├── final_model/
+│   └── checkpoint_70.pth
+├── full_video_pipeline.ipynb
+├── generate_unisal_latents.py
+├── sample_video.py
+├── train.py
+└── requirements.txt
+```
+
+## Paper
+
+**Infinite Gaze Generation for Videos with Autoregressive Diffusion**
+Jenna Kang, Colin Groth, Tong Wu, Finley Torrens, Patsorn Sangkloy, Gordon Wetzstein, and Qi Sun.
+ECCV 2026.
+
+[arXiv:2603.24938](https://arxiv.org/abs/2603.24938)
+
+## Citation
+
+If you find this work useful, please cite:
+
+```bibtex
+@article{kang2026infinitegaze,
+  title={Infinite Gaze Generation for Videos with Autoregressive Diffusion},
+  author={Kang, Jenna and Groth, Colin and Wu, Tong and Torrens, Finley and Sangkloy, Patsorn and Wetzstein, Gordon and Sun, Qi},
+  journal={arXiv preprint arXiv:2603.24938},
+  year={2026}
+}
+```
+
+## Acknowledgements
+
+This repository contains the implementation associated with our ECCV 2026 work on autoregressive diffusion for long-horizon video gaze generation.
