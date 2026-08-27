@@ -1,0 +1,105 @@
+experiment_name: unet_saliency_hires_original_diem
+output_root: artifacts/experiments
+
+model:
+  target: models.unet_saliency_hires_original.Unet
+  params:
+    attn_embed_size: 128
+    saliency_features: &saliency_features 64
+    saliency_patches: &saliency_patches 24
+    down_channels: [32, 64, 128, 256]
+    down_sample: [true, true, false]
+    in_channels: 2
+    mid_channels: [256, 256, 128]
+    num_cross_attn_heads_pre_unet: 4
+    num_down_layers: 2
+    num_mid_layers: 2
+    num_self_attn_heads_in_unet: 3
+    num_up_layers: 2
+    out_channels: 2
+    patches_crss_attn_b4_unet: true
+    patches_crss_attn_thru_unet: true
+    pos_enc_type: sinusoidal_fine
+    traj_pos_enc_height: &stim_h 224
+    traj_pos_enc_width: &stim_w 224
+    seq_len: &full_seq_len 135
+    should_do_pos_enc: false
+    time_emb_dim: 128
+
+optimizer:
+  target: torch.optim.Adam
+  params:
+    lr: 0.0001
+
+criterion:
+  target: torch.nn.MSELoss
+  params: {}
+
+diffusion:
+  train_scheduler:
+    target: diffusers.schedulers.DDPMScheduler
+    params:
+      beta_end: 0.02
+      beta_start: 0.0001
+      num_train_timesteps: 1000
+  eval_scheduler:
+    target: diffusers.schedulers.DDIMScheduler
+    params:
+      beta_end: 0.02
+      beta_start: 0.0001
+      clip_sample: false
+      num_train_timesteps: 1000
+      set_alpha_to_one: true
+    num_inference_steps: 50
+    eta: 0.9
+
+dataset:
+  root: datasets/DIEM
+  stim_w: *stim_w
+  stim_h: *stim_h
+  history_len: &history_len 90
+  pred_len: &pred_len 45
+  data_sample_stride: &data_sample_stride 135
+  frame_stride: &frame_stride 5
+  normalize: true
+  should_preload: false
+  saliency_patch_dir_name: saliency_unisal_latents_small
+  saliency_patch_feature_dim: *saliency_features
+  saliency_patch_token_count: *saliency_patches
+  patch_frames_aligned_to_prediction_window: true
+  only_frame_stride_patches: false
+  enable_saliency_patches_cache: false
+  saliency_patches_cache_size: 128
+
+train_dataset:
+  target: datasets.diem.DIEMDataset
+  params:
+    stim_to_sub_pth: split_files/diem_final_video_train.json
+
+val_dataset:
+  target: datasets.diem.DIEMDataset
+  params:
+    stim_to_sub_pth: split_files/diem_final_video_val.json
+
+train_loader:
+  target: torch.utils.data.DataLoader
+  params:
+    batch_size: 64
+    num_workers: 1
+    shuffle: true
+
+val_loader:
+  target: torch.utils.data.DataLoader
+  params:
+    batch_size: 64
+    num_workers: 1
+    shuffle: false
+
+train:
+  num_epochs: 3001
+  save_every: 5
+  log_every: 1
+  use_amp: false
+  cfg_on: true
+  cfg_drop_rate: 0.1
+  cfg_scale: 4.0

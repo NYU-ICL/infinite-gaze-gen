@@ -1,0 +1,12 @@
+# Runtime dependencies for the supported video-to-gaze pipeline.
+torch
+torchvision
+numpy
+PyYAML
+diffusers
+einops
+opencv-python
+Pillow
+scipy
+tqdm
+ipykernel

@@ -1,0 +1,55 @@
+# Inference settings matching final_model/checkpoint_70.pth.
+model:
+  target: models.unet_saliency_hires.Unet
+  params:
+    in_channels: 2
+    out_channels: 2
+    seq_len: 90
+    history_len: 90
+    pred_len: 90
+    data_sample_stride: 180
+    down_channels: [32, 64, 128, 256]
+    mid_channels: [256, 256, 128]
+    time_emb_dim: 128
+    down_sample: [true, true, false]
+    num_down_layers: 2
+    num_mid_layers: 2
+    num_up_layers: 2
+    num_self_attn_heads_in_unet: 3
+    num_cross_attn_heads_pre_unet: 4
+    saliency_patches: 64
+    saliency_features: 24
+    patches_crss_attn_b4_unet: true
+    patches_crss_attn_thru_unet: true
+    attn_embed_size: 128
+    pos_enc_type: sinusoidal_fine
+    should_do_pos_enc: false
+    frame_stride: 5
+    use_frame_conditioning: true
+    traj_pos_enc_height: 224
+    traj_pos_enc_width: 224
+
+diffusion:
+  eval_scheduler:
+    target: diffusers.schedulers.DDIMScheduler
+    params:
+      beta_end: 0.02
+      beta_start: 0.0001
+      clip_sample: false
+      num_train_timesteps: 1000
+      set_alpha_to_one: true
+    num_inference_steps: 50
+    eta: 0.9
+
+dataset:
+  stim_w: 224
+  stim_h: 224
+  history_len: 90
+  pred_len: 90
+  frame_stride: 5
+  saliency_patch_dir_name: saliency_unisal_latents_small
+  saliency_patch_feature_dim: 24
+  saliency_patch_token_count: 64
+
+train:
+  cfg_scale: 4
