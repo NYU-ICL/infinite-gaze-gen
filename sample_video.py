@@ -20,13 +20,21 @@ from common import (
 )
 
 
+# The bundled inference configuration is paired with the checkpoint below.
+# Keeping these defaults together prevents accidentally loading this model with
+# a stale training configuration.
+DEFAULT_CONFIG = "final_model_90_45/inference_config.yaml"
+DEFAULT_CHECKPOINT = "final_model_90_45/checkpoint_70.pth"
+DEFAULT_OUTPUT_DIR = r"C:\Users\jk8659\NYU\research\Scanpath\diffeye\artifacts\video_samples"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate scanpath samples for a single video.")
-    parser.add_argument("--config", type=str, default="config/full_diem.yaml")
-    parser.add_argument("--checkpoint", type=str, required=True)
+    parser.add_argument("--config", type=str, default=DEFAULT_CONFIG)
+    parser.add_argument("--checkpoint", type=str, default=DEFAULT_CHECKPOINT)
     parser.add_argument("--video-path", type=str, required=True)
     parser.add_argument("--conditioning-dir", type=str, default=None)
-    parser.add_argument("--output-dir", type=str, default="artifacts/video_samples")
+    parser.add_argument("--output-dir", type=str, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--num-samples", type=int, default=10)
     parser.add_argument("--max-frames", type=int, default=None)
     parser.add_argument("--overlay-trail", type=int, default=20)
@@ -253,14 +261,21 @@ def render_overlay_video(
 
 def main() -> None:
     args = parse_args()
-    cfg = merge_opts_to_config(load_yaml_config(args.config), args.opts)
+    config_path = Path(args.config)
+    checkpoint_path = Path(args.checkpoint)
+    if not config_path.is_file():
+        raise FileNotFoundError(f"Inference configuration not found: {config_path}")
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(f"Model checkpoint not found: {checkpoint_path}")
+
+    cfg = merge_opts_to_config(load_yaml_config(config_path), args.opts)
     seed_everything(int(args.seed))
 
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
     model = instantiate_from_config(cfg["model"]).to(device)
     scheduler = instantiate_from_config(cfg["diffusion"]["eval_scheduler"])
     scheduler.set_timesteps(int(cfg["diffusion"]["eval_scheduler"]["num_inference_steps"]))
-    load_checkpoint(args.checkpoint, model)
+    load_checkpoint(checkpoint_path, model)
     model.eval()
 
     video_path = Path(args.video_path).resolve()
@@ -293,8 +308,11 @@ def main() -> None:
     for window_start in range(0, total_frames, pred_len):
         remaining = total_frames - window_start
         take = min(pred_len, remaining)
+        # Each conditioning feature must represent the frame being predicted.
+        # `current_history` contains preceding gaze coordinates only; it must
+        # not shift the video/saliency timeline into a future window.
         patch_frame_indices = [
-            min(total_frames - 1, window_start + history_len + offset)
+            min(total_frames - 1, window_start + offset)
             for offset in range(0, pred_len, frame_stride)
         ]
         conditioning = load_patch_sequence(

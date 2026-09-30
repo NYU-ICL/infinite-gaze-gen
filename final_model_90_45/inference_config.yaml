@@ -1,13 +1,16 @@
-# Inference settings matching final_model/checkpoint_70.pth.
+# Inference-only translation of logs/config_w_abs_paths.yaml.
+# checkpoint_70.pth was trained as the former DINO-conditioned model.  The
+# current runtime uses unet_saliency_hires and load_checkpoint() migrates the
+# renamed dino_mlp weights to saliency_mlp when loading this checkpoint.
 model:
   target: models.unet_saliency_hires.Unet
   params:
     in_channels: 2
     out_channels: 2
-    seq_len: 90
+    seq_len: 45
     history_len: 90
-    pred_len: 90
-    data_sample_stride: 180
+    pred_len: 45
+    data_sample_stride: 135
     down_channels: [32, 64, 128, 256]
     mid_channels: [256, 256, 128]
     time_emb_dim: 128
@@ -33,23 +36,23 @@ diffusion:
   eval_scheduler:
     target: diffusers.schedulers.DDIMScheduler
     params:
-      beta_end: 0.02
       beta_start: 0.0001
-      clip_sample: false
+      beta_end: 0.02
       num_train_timesteps: 1000
+      clip_sample: false
       set_alpha_to_one: true
     num_inference_steps: 50
     eta: 0.9
 
 dataset:
+  history_len: 90
+  pred_len: 45
+  frame_stride: 5
   stim_w: 224
   stim_h: 224
-  history_len: 90
-  pred_len: 90
-  frame_stride: 5
-  saliency_patch_dir_name: saliency_unisal_latents_small
   saliency_patch_feature_dim: 24
   saliency_patch_token_count: 64
+  saliency_patch_dir_name: saliency_unisal_latents_small
 
 train:
   cfg_scale: 4

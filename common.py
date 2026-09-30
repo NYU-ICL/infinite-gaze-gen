@@ -268,28 +268,27 @@ def load_checkpoint(
     scheduler=None,
 ) -> tuple[int, int]:
     payload = torch.load(path, map_location="cpu", weights_only=False)
-    state_dict = payload["model_state_dict"]
+    if not isinstance(payload, dict):
+        raise ValueError(f"Unsupported checkpoint payload in {path}: expected a dictionary.")
+    # Accept both the training checkpoint format used by this project and the
+    # common bare/state_dict export formats used for inference-only bundles.
+    state_dict = payload.get("model_state_dict", payload.get("state_dict", payload))
+    if not isinstance(state_dict, dict):
+        raise ValueError(f"Unsupported model state dictionary in {path}.")
     try:
         model.load_state_dict(state_dict)
     except RuntimeError:
-        # Allow checkpoints produced before a module-prefix rename to be used
-        # when every unmatched tensor has one unambiguous, shape-compatible
-        # destination with the same parameter suffix.
+        # The 90/45 checkpoint was trained before the conditioning module was
+        # renamed from dino_mlp to saliency_mlp.  Translate that known rename
+        # explicitly, rather than suffix matching (which is ambiguous for
+        # repeated Sequential layer names such as "0.weight").
         target_state = model.state_dict()
         migrated_state = {}
         for key, value in state_dict.items():
-            if key in target_state:
-                migrated_state[key] = value
-                continue
-
-            suffix = key.split(".", 1)[-1]
-            candidates = [
-                target_key
-                for target_key, target_value in target_state.items()
-                if target_key.split(".", 1)[-1] == suffix
-                and tuple(target_value.shape) == tuple(value.shape)
-            ]
-            migrated_state[candidates[0] if len(candidates) == 1 else key] = value
+            migrated_key = key.removeprefix("module.")
+            if migrated_key.startswith("dino_mlp."):
+                migrated_key = "saliency_mlp." + migrated_key.removeprefix("dino_mlp.")
+            migrated_state[migrated_key] = value
         model.load_state_dict(migrated_state)
     if optimizer is not None and payload.get("optimizer_state_dict") is not None:
         optimizer.load_state_dict(payload["optimizer_state_dict"])

@@ -22,7 +22,7 @@ The notebook:
 
 1. Loads an input video.
 2. Generates UNISAL saliency latents.
-3. Loads the trained gaze-generation model.
+3. Loads the bundled 90/45 gaze-generation checkpoint.
 4. Generates a gaze trajectory.
 5. Renders the prediction over the original video.
 6. Saves the result as `overlay.mp4`.
@@ -37,26 +37,20 @@ in the first notebook cell and run the notebook from top to bottom.
 
 ## Pretrained Checkpoint
 
-Download the pretrained model checkpoint here:
-
-[Google Drive](https://drive.google.com/drive/folders/1wlbaFsqxYYNagDdSrv44OEOjs5-vew4k?usp=sharing)
-
-Place:
+The repository is configured for the included 90-history / 45-prediction
+checkpoint and its paired inference configuration:
 
 ```text
-checkpoint_70.pth
+final_model_90_45/
+├── checkpoint_70.pth
+└── inference_config.yaml
 ```
 
-under:
+The full-video notebook writes its temporary saliency latents and generated
+videos to:
 
 ```text
-final_model/
-```
-
-so that the expected path is:
-
-```text
-final_model/checkpoint_70.pth
+C:\Users\jk8659\NYU\research\Scanpath\diffeye\artifacts\full_video_pipeline\
 ```
 
 ## Environment Setup
@@ -107,18 +101,16 @@ Generate a gaze trajectory from an input video with:
 
 ```bash
 python sample_video.py \
-    --config config/full_diem.yaml \
-    --checkpoint path/to/checkpoint.pth \
     --video-path path/to/video.mp4 \
     --conditioning-dir path/to/saliency_unisal_latents_small/<video_stem>
 ```
 
 If `--conditioning-dir` is omitted, the script searches for a sibling directory corresponding to the conditioning name specified in the configuration.
 
-Outputs are written to:
+By default, outputs are written to:
 
 ```text
-artifacts/video_samples/<video_stem>/sample_XXX/
+C:\Users\jk8659\NYU\research\Scanpath\diffeye\artifacts\video_samples\<video_stem>\sample_XXX\
 ```
 
 Each sample contains:
@@ -135,18 +127,11 @@ OpenCV (`cv2`) is required for overlay rendering.
 
 ## Training
 
-Train the model using:
-
-```bash
-python train.py \
-    --config config/full_diem.yaml \
-    --root-dir artifacts
-```
-
-The expected DIEM dataset location is:
+The bundled 90/45 YAML is inference-only. Training requires a separate
+training configuration. The expected DIEM dataset location for training is:
 
 ```text
-artifacts/datasets/DIEM/
+C:\Users\jk8659\NYU\research\Scanpath\diffeye\artifacts\datasets\DIEM\
 ```
 
 The dataset root should contain:
@@ -180,9 +165,9 @@ frame_XXXXXX.pt
 ```text
 .
 ├── config/
-│   └── full_diem.yaml
-├── final_model/
-│   └── checkpoint_70.pth
+├── final_model_90_45/
+│   ├── checkpoint_70.pth
+│   └── inference_config.yaml
 ├── full_video_pipeline.ipynb
 ├── generate_unisal_latents.py
 ├── sample_video.py
