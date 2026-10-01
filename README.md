@@ -46,11 +46,13 @@ final_model_90_45/
 └── inference_config.yaml
 ```
 
-The full-video notebook writes its temporary saliency latents and generated
-videos to:
+The full-video notebook writes temporary saliency latents and generated videos
+to `artifacts/full_video_pipeline/` by default. Set
+`INFINITE_GAZE_ARTIFACT_ROOT` to use an external artifact directory.
+The same variable controls the default output directory for `sample_video.py`.
 
 ```text
-C:\Users\jk8659\NYU\research\Scanpath\diffeye\artifacts\full_video_pipeline\
+artifacts/full_video_pipeline/
 ```
 
 ## Environment Setup
@@ -110,7 +112,7 @@ If `--conditioning-dir` is omitted, the script searches for a sibling directory 
 By default, outputs are written to:
 
 ```text
-C:\Users\jk8659\NYU\research\Scanpath\diffeye\artifacts\video_samples\<video_stem>\sample_XXX\
+artifacts/video_samples/<video_stem>/sample_XXX/
 ```
 
 Each sample contains:
@@ -131,7 +133,7 @@ The bundled 90/45 YAML is inference-only. Training requires a separate
 training configuration. The expected DIEM dataset location for training is:
 
 ```text
-C:\Users\jk8659\NYU\research\Scanpath\diffeye\artifacts\datasets\DIEM\
+artifacts/datasets/DIEM/
 ```
 
 The dataset root should contain:

@@ -1,6 +1,7 @@
 import argparse
 import csv
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -25,7 +26,8 @@ from common import (
 # a stale training configuration.
 DEFAULT_CONFIG = "final_model_90_45/inference_config.yaml"
 DEFAULT_CHECKPOINT = "final_model_90_45/checkpoint_70.pth"
-DEFAULT_OUTPUT_DIR = r"C:\Users\jk8659\NYU\research\Scanpath\diffeye\artifacts\video_samples"
+DEFAULT_ARTIFACT_ROOT = Path(os.environ.get("INFINITE_GAZE_ARTIFACT_ROOT", "artifacts"))
+DEFAULT_OUTPUT_DIR = str(DEFAULT_ARTIFACT_ROOT / "video_samples")
 
 
 def parse_args() -> argparse.Namespace:
