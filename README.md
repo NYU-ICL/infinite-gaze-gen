@@ -1,3 +1,5 @@
+> To reproduce Table 1 exactly (eval/results/all_baselines_reproduce_final), follow the scripts and instructions in the [`commands`](commands) directory.
+
 # Infinite Gaze Generation for Videos with Autoregressive Diffusion
 
 **ECCV 2026**
@@ -81,8 +83,12 @@ To generate saliency conditioning for a single video:
 ```bash
 python generate_unisal_latents.py \
     --video-path path/to/video.mp4 \
-    --output-root path/to/saliency_unisal_latents_small
+    --output-root path/to/saliency_unisal_latents_small \
+    --source DHF1K
 ```
+
+`DHF1K` is the default source domain for general videos and produces the
+conditioning format used by the sampling example.
 
 This creates:
 

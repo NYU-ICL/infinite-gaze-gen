@@ -29,7 +29,7 @@ class DIEMDataset(Dataset):
     def __init__(
         self,
         root: str,
-        stim_to_sub_pth: str,
+        stim_to_sub_pth: str | None,
         stim_w: int = 224,
         stim_h: int = 224,
         normalize: bool = True,
@@ -72,11 +72,15 @@ class DIEMDataset(Dataset):
         self._patch_cache = {} if enable_saliency_patches_cache else None
         self._patch_cache_size = int(saliency_patches_cache_size)
 
-        with open(stim_to_sub_pth, "r", encoding="utf-8") as handle:
-            stim_to_sub = json.load(handle)
-        if not isinstance(stim_to_sub, dict):
-            raise ValueError("stim_to_sub_pth must contain a JSON object of stimulus -> subjects.")
-        self.stim_to_sub_json = {str(k): [str(x) for x in v] for k, v in stim_to_sub.items()}
+        self._load_all_subjects = stim_to_sub_pth is None
+        if self._load_all_subjects:
+            self.stim_to_sub_json: dict[str, list[str]] = {}
+        else:
+            with open(stim_to_sub_pth, "r", encoding="utf-8") as handle:
+                stim_to_sub = json.load(handle)
+            if not isinstance(stim_to_sub, dict):
+                raise ValueError("stim_to_sub_pth must contain a JSON object of stimulus -> subjects.")
+            self.stim_to_sub_json = {str(k): [str(x) for x in v] for k, v in stim_to_sub.items()}
 
         self.stim_video_paths: dict[str, Path] = {}
         self.stim_video_sizes: dict[str, tuple[int, int]] = {}
@@ -121,12 +125,14 @@ class DIEMDataset(Dataset):
             raise FileNotFoundError(f"No DIEM stimuli found under {self.data_root}")
 
         for stim_name, stim_root in stim_roots.items():
-            if stim_name not in self.stim_to_sub_json:
+            if not self._load_all_subjects and stim_name not in self.stim_to_sub_json:
                 continue
             eye_tracks = self._load_root_dir(stim_root, stim_name)
-            allowed = set(self.stim_to_sub_json[stim_name])
+            allowed = None if self._load_all_subjects else set(self.stim_to_sub_json[stim_name])
+            if self._load_all_subjects:
+                self.stim_to_sub_json[stim_name] = [eye.prefix for eye in eye_tracks]
             for eye in eye_tracks:
-                if eye.prefix not in allowed:
+                if allowed is not None and eye.prefix not in allowed:
                     continue
                 self.eye_data_list.append(eye)
                 self.stim_sub_list.append(StimSub(stim=stim_name, sub=eye.prefix))

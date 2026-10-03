@@ -106,6 +106,23 @@ def load_patch_sequence(
     return torch.stack(patches, dim=0)
 
 
+def clip_normalized_history_to_movie(
+    points: torch.Tensor, movie_w: int, movie_h: int
+) -> torch.Tensor:
+    """Clip [B, T, 2] normalized coordinates to valid movie-pixel locations.
+
+    The autoregressive DIEM generator feeds clipped predictions back as history.
+    Keeping that rule here prevents an off-frame prediction from becoming an
+    unbounded conditioning history on a later window.
+    """
+    if points.shape[-1] != 2:
+        raise ValueError(f"Expected points shaped [B,T,2], got {tuple(points.shape)}")
+    clipped = points.clone()
+    clipped[..., 0] = clipped[..., 0].clamp(-1.0, 1.0 - 2.0 / max(float(movie_w), 1.0))
+    clipped[..., 1] = clipped[..., 1].clamp(-1.0, 1.0 - 2.0 / max(float(movie_h), 1.0))
+    return clipped
+
+
 def sample_window(
     model,
     scheduler,
@@ -115,8 +132,7 @@ def sample_window(
     num_samples: int,
     cfg_scale: float,
     eta: float,
-    seed: int,
-    seed_step: int,
+    bases: list[int],
     device: torch.device,
 ) -> torch.Tensor:
     conditioning = conditioning.to(device)
@@ -127,21 +143,24 @@ def sample_window(
     if history.shape[0] == 1:
         history = history.expand(num_samples, -1, -1).contiguous()
 
+    if len(bases) != num_samples:
+        raise ValueError(f"Expected {num_samples} noise seeds, got {len(bases)}")
     noises = []
-    for idx in range(num_samples):
+    for base in bases:
         generator = torch.Generator(device=device)
-        generator.manual_seed(int(seed) + idx * int(seed_step))
+        generator.manual_seed(int(base))
         noises.append(torch.randn((1, 2, pred_len), generator=generator, device=device))
     generated = torch.cat(noises, dim=0)
 
-    for timestep in scheduler.timesteps:
-        model_input = torch.cat([history, generated], dim=2) if history.shape[-1] > 0 else generated
-        t_tensor = torch.full((num_samples,), int(timestep), device=device, dtype=torch.long)
-        noise_with_cond, _ = model(model_input, t_tensor, conditioning)
-        noise_without_cond, _ = model(model_input, t_tensor, torch.zeros_like(conditioning))
-        noise_pred = (1.0 - cfg_scale) * noise_without_cond + cfg_scale * noise_with_cond
-        noise_pred = noise_pred[:, :, -pred_len:]
-        generated = scheduler.step(noise_pred, timestep, generated, eta=float(eta)).prev_sample
+    with torch.inference_mode():
+        for timestep in scheduler.timesteps:
+            model_input = torch.cat([history, generated], dim=2) if history.shape[-1] > 0 else generated
+            t_tensor = torch.full((num_samples,), int(timestep), device=device, dtype=torch.long)
+            noise_with_cond, _ = model(model_input, t_tensor, conditioning)
+            noise_without_cond, _ = model(model_input, t_tensor, torch.zeros_like(conditioning))
+            noise_pred = (1.0 - cfg_scale) * noise_without_cond + cfg_scale * noise_with_cond
+            noise_pred = noise_pred[:, :, -pred_len:]
+            generated = scheduler.step(noise_pred, timestep, generated, eta=float(eta)).prev_sample
 
     return generated.detach().cpu().permute(0, 2, 1).contiguous()
 
@@ -261,28 +280,61 @@ def render_overlay_video(
     writer.release()
 
 
-def main() -> None:
-    args = parse_args()
-    config_path = Path(args.config)
-    checkpoint_path = Path(args.checkpoint)
+@torch.no_grad()
+def sample_video(
+    video_path: str | Path,
+    *,
+    conditioning_dir: str | Path | None = None,
+    config: str | Path = DEFAULT_CONFIG,
+    checkpoint: str | Path = DEFAULT_CHECKPOINT,
+    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
+    num_samples: int = 10,
+    max_frames: int | None = None,
+    seed: int = 12,
+    seed_step: int = 1,
+    device: str | torch.device | None = None,
+    opts: list[str] | None = None,
+    render_overlays: bool = True,
+    overlay_trail: int = 20,
+    overlay_radius: int = 6,
+    overlay_thickness: int = -1,
+) -> dict[str, object]:
+    """Generate autoregressive scanpaths for an arbitrary video.
+
+    This is the notebook-friendly counterpart of the CLI.  It uses the same
+    rollout rule as :mod:`sample_diem_val`: every predicted window is clipped
+    to the movie bounds and appended to the history used by the next window.
+    General videos have no observed gaze history, so the first window starts
+    with the model's zero-padded history.
+
+    Returns paths and generated coordinates so notebooks do not have to parse
+    the CSV files or emulate command-line arguments.
+    """
+    if num_samples <= 0:
+        raise ValueError("num_samples must be positive.")
+    if seed_step == 0:
+        raise ValueError("seed_step must be non-zero.")
+
+    config_path = Path(config)
+    checkpoint_path = Path(checkpoint)
     if not config_path.is_file():
         raise FileNotFoundError(f"Inference configuration not found: {config_path}")
     if not checkpoint_path.is_file():
         raise FileNotFoundError(f"Model checkpoint not found: {checkpoint_path}")
 
-    cfg = merge_opts_to_config(load_yaml_config(config_path), args.opts)
-    seed_everything(int(args.seed))
+    cfg = merge_opts_to_config(load_yaml_config(config_path), opts)
+    seed_everything(int(seed))
 
-    device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
-    model = instantiate_from_config(cfg["model"]).to(device)
+    target_device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    model = instantiate_from_config(cfg["model"]).to(target_device)
     scheduler = instantiate_from_config(cfg["diffusion"]["eval_scheduler"])
     scheduler.set_timesteps(int(cfg["diffusion"]["eval_scheduler"]["num_inference_steps"]))
     load_checkpoint(checkpoint_path, model)
     model.eval()
 
-    video_path = Path(args.video_path).resolve()
+    video_path = Path(video_path).resolve()
     conditioning_name = str(cfg["dataset"]["saliency_patch_dir_name"])
-    conditioning_dir = resolve_conditioning_dir(video_path, conditioning_name, args.conditioning_dir).resolve()
+    conditioning_dir = resolve_conditioning_dir(video_path, conditioning_name, str(conditioning_dir) if conditioning_dir is not None else None).resolve()
     prefer_plain_names = "unisal" in conditioning_name.lower()
 
     history_len = int(cfg["dataset"]["history_len"])
@@ -296,27 +348,30 @@ def main() -> None:
     stim_h = int(cfg["dataset"]["stim_h"])
 
     total_frames = get_video_frame_count(video_path)
-    if args.max_frames is not None:
-        total_frames = min(total_frames, int(args.max_frames))
+    if max_frames is not None:
+        total_frames = min(total_frames, int(max_frames))
+    if total_frames <= 0:
+        raise ValueError("The requested frame limit leaves no frames to sample.")
     movie_w, movie_h = get_video_size(video_path)
     movie_fps = get_video_fps(video_path)
 
-    output_dir = Path(args.output_dir).resolve() / video_path.stem
+    output_dir = Path(output_dir).resolve() / video_path.stem
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    current_history = torch.zeros((int(args.num_samples), 2, history_len), dtype=torch.float32)
+    current_history = torch.zeros((int(num_samples), 2, history_len), dtype=torch.float32)
     samples_per_window: list[torch.Tensor] = []
+    bases = [
+        int(seed) + sample_idx * 1000 * int(seed_step)
+        for sample_idx in range(int(num_samples))
+    ]
 
-    for window_start in range(0, total_frames, pred_len):
-        remaining = total_frames - window_start
-        take = min(pred_len, remaining)
+    for rollout, window_start in enumerate(range(0, total_frames, pred_len)):
+        window_end = min(total_frames, window_start + pred_len)
+        take = window_end - window_start
         # Each conditioning feature must represent the frame being predicted.
         # `current_history` contains preceding gaze coordinates only; it must
         # not shift the video/saliency timeline into a future window.
-        patch_frame_indices = [
-            min(total_frames - 1, window_start + offset)
-            for offset in range(0, pred_len, frame_stride)
-        ]
+        patch_frame_indices = list(range(window_start, window_end, frame_stride)) or [window_start]
         conditioning = load_patch_sequence(
             conditioning_dir=conditioning_dir,
             frame_indices=patch_frame_indices,
@@ -330,47 +385,84 @@ def main() -> None:
             conditioning=conditioning,
             history=current_history,
             pred_len=pred_len,
-            num_samples=int(args.num_samples),
+            num_samples=int(num_samples),
             cfg_scale=cfg_scale,
             eta=eta,
-            seed=int(args.seed) + window_start,
-            seed_step=int(args.seed_step),
-            device=device,
+            bases=[base + rollout * int(seed_step) for base in bases],
+            device=target_device,
         )
         window_keep = window_pred[:, :take, :]
         samples_per_window.append(window_keep)
-        history_update = window_keep.permute(0, 2, 1)
+        history_update = clip_normalized_history_to_movie(window_keep, movie_w, movie_h).permute(0, 2, 1)
         current_history = torch.cat([current_history, history_update], dim=2)[:, :, -history_len:]
 
     all_samples = torch.cat(samples_per_window, dim=1).numpy()
     metadata = {
         "video_path": str(video_path),
         "conditioning_dir": str(conditioning_dir),
-        "num_samples": int(args.num_samples),
+        "num_samples": int(num_samples),
         "num_points": int(all_samples.shape[1]),
+        "history_len": history_len,
+        "pred_len": pred_len,
+        "frame_stride": frame_stride,
+        "seed": int(seed),
+        "seed_step": int(seed_step),
+        "history_mode": "zero_padded_then_autoregressive_clipped_predictions",
     }
     with (output_dir / "metadata.json").open("w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
 
+    all_pixel_samples: list[np.ndarray] = []
     for sample_idx in range(all_samples.shape[0]):
         normalized_xy = all_samples[sample_idx]
         resized_xy = unnormalize_points(normalized_xy, stim_w, stim_h)
         pixel_xy = resized_xy.copy()
         pixel_xy[:, 0] *= movie_w / stim_w
         pixel_xy[:, 1] *= movie_h / stim_h
+        pixel_xy[:, 0] = np.clip(pixel_xy[:, 0], 0.0, max(0.0, float(movie_w - 1)))
+        pixel_xy[:, 1] = np.clip(pixel_xy[:, 1], 0.0, max(0.0, float(movie_h - 1)))
+        all_pixel_samples.append(pixel_xy)
         save_sample(output_dir, sample_idx, normalized_xy, pixel_xy)
-        if not args.skip_video_overlay:
+        if render_overlays:
             render_overlay_video(
                 video_path=video_path,
                 output_path=output_dir / f"sample_{sample_idx:03d}" / "overlay.mp4",
                 pixel_xy=pixel_xy,
                 fps=movie_fps,
-                trail=int(args.overlay_trail),
-                radius=int(args.overlay_radius),
-                thickness=int(args.overlay_thickness),
+                trail=int(overlay_trail),
+                radius=int(overlay_radius),
+                thickness=int(overlay_thickness),
             )
 
-    print(f"saved samples to {output_dir}")
+    return {
+        "output_dir": output_dir,
+        "normalized_xy": all_samples,
+        "video_xy": np.stack(all_pixel_samples),
+        "metadata": metadata,
+    }
+
+
+@torch.no_grad()
+def main() -> None:
+    args = parse_args()
+    result = sample_video(
+        args.video_path,
+        conditioning_dir=args.conditioning_dir,
+        config=args.config,
+        checkpoint=args.checkpoint,
+        output_dir=args.output_dir,
+        num_samples=args.num_samples,
+        max_frames=args.max_frames,
+        seed=args.seed,
+        seed_step=args.seed_step,
+        device=args.device,
+        opts=args.opts,
+        render_overlays=not args.skip_video_overlay,
+        overlay_trail=args.overlay_trail,
+        overlay_radius=args.overlay_radius,
+        overlay_thickness=args.overlay_thickness,
+    )
+    print(f"saved samples to {result['output_dir']}")
 
 
 if __name__ == "__main__":

@@ -32,7 +32,12 @@ def parse_args() -> argparse.Namespace:
         help="Vendored UNISAL training run to load.",
     )
     parser.add_argument("--frame-step", type=int, default=1)
-    parser.add_argument("--source", type=str, default="DIEM")
+    parser.add_argument(
+        "--source",
+        type=str,
+        default="DHF1K",
+        help="UNISAL source domain. DHF1K matches the general-video latent workflow.",
+    )
     parser.add_argument("--model-domain", type=str, default=None)
     parser.add_argument("--keep-workdir", action="store_true")
     return parser.parse_args()
